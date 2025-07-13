@@ -21,6 +21,24 @@ Built upon a multi-scale attention framework, Hi-Cformer simultaneously captures
 
 ---
 
+## Tutorial
+
+This repository includes a tutorial example to get you started quickly with Hi-Cformer.
+
+- **Demo Notebook:**  
+  The file [`demo/Embedding with Hi-Cformer.ipynb`](demo/Embedding%20with%20Hi-Cformer.ipynb) contains a step-by-step example.  
+  It explains the input file format, runs a training process, and performs visualization of the results.
+
+- **Quick Start with Training Script:**  
+  You can also use the executable Python script `hicformer/train_validation.py` to compute clustering metrics and quickly test the model.  
+  **Note:** You need to modify the input file path at the beginning of the script before running.
+
+  The script supports several command-line arguments. Example usage:
+
+  ```bash
+  python hicformer/train_validation.py --cuda 1 --mask_ratio 0.4 --num 0 --lr 0.0005 --atlr 0.0005 --chr_single_loss True --chr_single_ratio 0.5 --loss_ratio 0.02 --weight 0.1 --epochs 180
+---
+
 ## 📖 Citation
 
 If you use **Hi-Cformer** in your research, please cite:
