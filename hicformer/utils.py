@@ -262,7 +262,7 @@ class BlockWithCustomMask(nn.Module):
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
-class DiagonalPatchEmbed(nn.Module):
+class block_encoder(nn.Module):
     """
     Modified Patch Embedding module that extracts and processes only the diagonal patches from the input feature map.
 

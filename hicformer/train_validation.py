@@ -163,11 +163,11 @@ if __name__ == '__main__':
         whole_size = whole_size + cal_expand_tensor(item)
     num_patches = max_height // min(patch_size)
 
-    model1 = hicformer(whole_size=whole_size, img_size=img_size, patch_size=patch_size, encoder_dim=encoder_dim,hidden_dim=hidden_dim,  chr_num=len(chr_list),in_chans=1,
+    model = hicformer(whole_size=whole_size, img_size=img_size, patch_size=patch_size, encoder_dim=encoder_dim,hidden_dim=hidden_dim,  chr_num=len(chr_list),in_chans=1,
                  embed_dim=embed_dim, depth=depth, num_heads=8,
                  mlp_ratio=4., norm_layer=partial(nn.LayerNorm, eps=1e-6), chr_mutual_visibility=vis, weight=weight, chr_single_loss=chr_single_loss,num_patches=num_patches, otherlf=otherlf, enorm=enorm)
     device = "cuda:"+str(cuda)
-    model1.to(device)
+    model.to(device)
 
     labels = new_label
     cell_num = len(labels)
@@ -199,7 +199,7 @@ if __name__ == '__main__':
     data_loader_test = DataLoader(dataset, batch_size=16, shuffle=False)
     
 
-    optimizer = torch.optim.Adam(model1.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
 
 
 
@@ -207,8 +207,8 @@ if __name__ == '__main__':
     
 
     all_states = {}
-    model1.to(device)
-    model_without_ddp = model1
+    model.to(device)
+    model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
 
     data_loader_train = DataLoader(dataset, batch_size=batch_size, drop_last=False, shuffle=True)
@@ -218,18 +218,17 @@ if __name__ == '__main__':
     print(f"Start training for {epochs} epochs")
     start_time = time.time()
     best_loss =  float("inf")
-    warmup_steps = 500
     p_count = 0
 
     if pretrain == True:
-        optimizer_chr = torch.optim.Adam(model1.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
-        optimizer_patch = torch.optim.Adam(model1.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+        optimizer_chr = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
+        optimizer_patch = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=betas)
 
         
         
         for epoch in range(pretrain_epoch):
             if (epoch+5) % 10 == 0:
-                nmi, ari,homo,ami = calNMI_pretrain(model1, data_loader_test, labels, device=device)
+                nmi, ari,homo,ami = calNMI_pretrain(model, data_loader_test, labels, device=device)
                 mnmi = max(nmi)
                 if mnmi > best_nmi:
                     best_nmi = mnmi
@@ -240,7 +239,7 @@ if __name__ == '__main__':
                         all_states = {}
                     all_states['best_cluster_pretrain'] = {
                             'epoch': epoch,
-                            'model': model1.state_dict(),
+                            'model': model.state_dict(),
                             'optimizer_state_dict': optimizer_chr.state_dict(),
                             }
                     torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
@@ -248,19 +247,19 @@ if __name__ == '__main__':
                     f.write(str(epoch) + "chr_pretrain"+ '\n')
                     f.write(f"NMI: {nmi[0]} ARI: {ari[0]} Homo: {homo[0]} AMI: {ami[0]}\n")
                     f.write(f"NMI: {nmi[1]} ARI: {ari[1]} Homo: {homo[1]} AMI: {ami[1]}\n")
-            model1.train()
+            model.train()
             epoch_chr_loss = 0.0
             epoch_chr_single_loss = 0.0
             epoch_loss = 0.0
             for inputs in data_loader_train:
                 inputs = [item.to(device) for item in inputs]
                 optimizer_chr.zero_grad()
-                chr_loss, chr_single_loss = model1.aepretrain(inputs)
+                chr_loss, chr_single_loss = model.aepretrain(inputs)
                 loss = 0.0*chr_single_loss + 1.0*chr_loss
                 loss.backward()
                 optimizer_chr.step()
                 epoch_chr_loss += chr_loss.item()
-                if model1.chr_single_loss:
+                if model.chr_single_loss:
                     epoch_chr_single_loss += chr_single_loss.item()
                 else:
                     epoch_chr_single_loss += chr_single_loss
@@ -281,7 +280,7 @@ if __name__ == '__main__':
                     all_states = {}
                 all_states['best_pretrain'] = {
                             'epoch': epoch,
-                            'model': model1.state_dict(),
+                            'model': model.state_dict(),
                             'optimizer_state_dict': optimizer_chr.state_dict(),
                             }
                 torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
@@ -295,12 +294,12 @@ if __name__ == '__main__':
         best_loss =  float("inf")
         p_count = 0
         for epoch in range(pretrain_epoch):
-            model1.train()
+            model.train()
             epoch_chr_loss = 0.0
             for inputs in data_loader_train:
                 inputs = [item.to(device) for item in inputs]
                 optimizer_patch.zero_grad()
-                chr_loss = model1.patch_pretrain(inputs)
+                chr_loss = model.patch_pretrain(inputs)
                 #loss = loss_ratio*patch_loss + (1-loss_ratio)*chr_loss
                 chr_loss.backward()
                 optimizer_patch.step()
@@ -318,7 +317,7 @@ if __name__ == '__main__':
                     all_states = {}
                 all_states['best_pretrain'] = {
                             'epoch': epoch,
-                            'model': model1.state_dict(),
+                            'model': model.state_dict(),
                             'optimizer_state_dict': optimizer_chr.state_dict(),
                             }
                 torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
@@ -331,15 +330,15 @@ if __name__ == '__main__':
                 break    
                 #noam_scheduler.step()
         all_states = torch.load(save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
-        model1.load_state_dict(all_states['best_pretrain']['model'])
-        model1.to(device)
+        model.load_state_dict(all_states['best_pretrain']['model'])
+        model.to(device)
     elif pretrain != False:
         all_states = torch.load(save_name_prefix+pretrain+"dim_"+str(hidden_dim)+".pth")
-        model1.load_state_dict(all_states['best_pretrain']['model'])
-        nmi, ari,homo,ami = calNMI_pretrain(model1, data_loader_test, labels, device=device)
-        model1.to(device)
+        model.load_state_dict(all_states['best_pretrain']['model'])
+        nmi, ari,homo,ami = calNMI_pretrain(model, data_loader_test, labels, device=device)
+        model.to(device)
     else:
-        model1.to(device)
+        model.to(device)
         
             
     best_loss =  float("inf")
@@ -353,15 +352,15 @@ if __name__ == '__main__':
     data_loader_test = DataLoader(dataset, batch_size=16, shuffle=False)
     
 
-    optimizer = torch.optim.Adam(model1.parameters(), lr=atlr, weight_decay=weight_decay, betas=betas)
+    optimizer = torch.optim.Adam(model.parameters(), lr=atlr, weight_decay=weight_decay, betas=betas)
     
 
 
     cudnn.benchmark = True
 
 
-    model1.to(device)
-    model_without_ddp = model1
+    model.to(device)
+    model_without_ddp = model
     print("Model = %s" % str(model_without_ddp))
 
     data_loader_train = DataLoader(dataset, batch_size=batch_size, drop_last=False, shuffle=True)
@@ -371,7 +370,6 @@ if __name__ == '__main__':
     print(f"Start training for {epochs} epochs")
     start_time = time.time()
     best_loss =  float("inf")
-    warmup_steps = 500
     best_loss =  float("inf")
     p_count = 0
     p_count_all = 0
@@ -379,7 +377,7 @@ if __name__ == '__main__':
     data_loader_train = DataLoader(dataset, batch_size=batch_size, drop_last=False, shuffle=True)
     for epoch in range(epochs):
         if (epoch) % 10 == 0:
-            nmi, ari,homo,ami = calNMI(model1, data_loader_test, labels, device=device)
+            nmi, ari,homo,ami = calNMI(model, data_loader_test, labels, device=device)
             mnmi = nmi[0]
             with open(save_name_prefix+"result"+str(num)+".txt", 'a') as f:
                 f.write(str(epoch) + '\n')
@@ -392,12 +390,12 @@ if __name__ == '__main__':
                     all_states = {}
                 all_states['best_cluster'] = {
                 'epoch': epoch,
-                'model': model1.state_dict(),
+                'model': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 }
                 best_nmi = mnmi
                 torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
-        model1.train()
+        model.train()
         running_loss = 0.0
         epoch_patch_loss = 0.0
         epoch_chr_loss = 0.0
@@ -405,7 +403,7 @@ if __name__ == '__main__':
         for inputs in data_loader_train:
             inputs = [item.to(device) for item in inputs]
             optimizer.zero_grad()
-            loss, x, chr_pred, cell_embed,token_class, patch_loss, chr_loss, chr_single_loss = model1(inputs, mask_ratio=mask_ratio)
+            x, chr_pred, cell_embed,token_class, patch_loss, chr_loss, chr_single_loss = model(inputs, mask_ratio=mask_ratio)
             loss = loss_ratio*patch_loss + (1-loss_ratio)*(1-chr_single_ratio)*chr_loss + (1-loss_ratio)*(chr_single_ratio)*chr_single_loss
             loss.backward()
             optimizer.step()
@@ -431,7 +429,7 @@ if __name__ == '__main__':
                 all_states = {}
             all_states['best'] = {
             'epoch': epoch,
-            'model': model1.state_dict(),
+            'model': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             }
             torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
@@ -448,7 +446,7 @@ if __name__ == '__main__':
                 all_states = {}
             all_states['best_chr'] = {
             'epoch': epoch,
-            'model': model1.state_dict(),
+            'model': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             }
             torch.save(all_states,  save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
@@ -460,8 +458,8 @@ if __name__ == '__main__':
             break   
     if os.path.exists(save_name):
         all_states = torch.load(save_name_prefix+str(num)+"dim_"+str(hidden_dim)+".pth")
-        model1.load_state_dict(all_states['best_chr']['model'])
-        nmi, ari,homo,ami = calNMI(model1, data_loader_test, labels, device=device)
+        model.load_state_dict(all_states['best_chr']['model'])
+        nmi, ari,homo,ami = calNMI(model, data_loader_test, labels, device=device)
         with open(save_name_prefix+"result"+str(num)+".txt", 'a') as f:
             f.write('best model' + '\n')
             f.write(f"NMI: {nmi[0]} ARI: {ari[0]} Homo: {homo[0]} AMI: {ami[0]}\n")

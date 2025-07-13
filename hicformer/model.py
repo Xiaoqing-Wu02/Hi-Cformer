@@ -3,13 +3,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from .utils import DiagonalPatchEmbed, BlockWithCustomMask
+from .utils import block_encoder, BlockWithCustomMask
 
 
 class hicformer(nn.Module):
-    def __init__(self, whole_size=1000, img_size=112, hidden_dim=20, patch_size=[16,32,64,128], encoder_dim=[], chr_num=21, in_chans=3,
-                 embed_dim=1024, depth=24, num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, chr_mutual_visibility=False, weight=1.0, chr_single_loss=False, otherlf='MSE', enorm=False, num_patches=24, weight_mode='mask'):
+    def __init__(self, whole_size=1000, img_size=112, hidden_dim=60, patch_size=[8, 16, 32, 64, 128], encoder_dim=[], chr_num=21, in_chans=1,
+                 embed_dim=128, depth=4, num_heads=8,
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, chr_mutual_visibility=True, weight=0.1, chr_single_loss=False, otherlf='MSE', enorm=False, num_patches=24, weight_mode='mask'):
         super().__init__()
 
         self.chr_single_loss = chr_single_loss
@@ -18,7 +18,7 @@ class hicformer(nn.Module):
         self.patch_size = patch_size
         # The total length of concatenated upper-triangular flattened contact maps of all chromosomes as input
         self.whole_size = whole_size
-        self.patch_embed_branches = nn.ModuleList([DiagonalPatchEmbed(s, in_chans, embed_dim, stride=s, padding=0, norm_layer=norm_layer) for s in patch_size])
+        self.multi_encoder = nn.ModuleList([block_encoder(s, in_chans, embed_dim, stride=s, padding=0, norm_layer=norm_layer) for s in patch_size])
         self.chr_num = chr_num
         self.img_size = img_size
         self.weight = weight
@@ -27,9 +27,9 @@ class hicformer(nn.Module):
         self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # Embedding layer including cell/chromosome cls token embeddings
         self.pos_embed = nn.Embedding(num_embeddings=num_patches + 1, embedding_dim=embed_dim)
-        self.size_embed = nn.Embedding(num_embeddings=len(self.patch_embed_branches), embedding_dim=embed_dim)
+        self.size_embed = nn.Embedding(num_embeddings=len(self.multi_encoder), embedding_dim=embed_dim)
         self.chr_embed = nn.Embedding(num_embeddings=chr_num, embedding_dim=embed_dim)
-        self.blocks = nn.ModuleList([
+        self.transformer_blocks = nn.ModuleList([
             BlockWithCustomMask(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
@@ -46,11 +46,9 @@ class hicformer(nn.Module):
 
         self.pred_hidden = nn.Linear(prev_dim, hidden_dim, bias=True)
         self.latent_layer = nn.Sequential(*latent_layer)
-        self.whole_pred = nn.Sequential(nn.Linear(hidden_dim, whole_size, bias=True), nn.ReLU())
-        self.patch_pred = nn.ModuleList([nn.Sequential(nn.Linear(embed_dim, s**2, bias=True), nn.ReLU()) for s in patch_size])
-        self.chr_pred = nn.Sequential(nn.Linear(embed_dim, int(img_size*(img_size+1)/2), bias=True), nn.ReLU())
-
-        self.norm_pix_loss = norm_pix_loss
+        self.cell_decoder = nn.Sequential(nn.Linear(hidden_dim, whole_size, bias=True), nn.ReLU())
+        self.block_decoder = nn.ModuleList([nn.Sequential(nn.Linear(embed_dim, s**2, bias=True), nn.ReLU()) for s in patch_size])
+        self.chr_decoder = nn.Sequential(nn.Linear(embed_dim, int(img_size*(img_size+1)/2), bias=True), nn.ReLU())
         self.initialize_weights()
 
 
@@ -60,8 +58,8 @@ class hicformer(nn.Module):
         torch.nn.init.xavier_uniform_(self.size_embed.weight)
         torch.nn.init.xavier_uniform_(self.chr_embed.weight)
         torch.nn.init.normal_(self.mask_token, std=.02)
-        for i in range(len(self.patch_embed_branches)):
-            w = self.patch_embed_branches[i].proj.weight.data
+        for i in range(len(self.multi_encoder)):
+            w = self.multi_encoder[i].proj.weight.data
             torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
 
         self.apply(self._init_weights)
@@ -96,11 +94,11 @@ class hicformer(nn.Module):
             chr_sentence.append(chr_cls)
             # token_sequence.append(chr_cls) # Insert chr_cls token here
 
-            for j in range(len(self.patch_embed_branches)):
+            for j in range(len(self.multi_encoder)):
                 input_image = x[i]
                 _, _, h, _ = input_image.shape
                 if h >= self.patch_size[j]:
-                    embed_layer = self.patch_embed_branches[j]
+                    embed_layer = self.multi_encoder[j]
                     tokens, diagonal_patches = embed_layer(input_image)
                     chr_sentence.append(tokens)
                     # token_sequence.append(tokens)
@@ -185,7 +183,7 @@ class hicformer(nn.Module):
         # Apply Transformer blocks
         N, L = replace_mask.shape
         attn_mask = attn_mask.to(device)
-        for blk in self.blocks:
+        for blk in self.transformer_blocks:
             token_sequence = blk(token_sequence, attn_mask=attn_mask)
 
         token_class = token_class[1:]
@@ -231,12 +229,12 @@ class hicformer(nn.Module):
         all_pred_chrs = []
         count = 0
         for chr_index, chr_list in enumerate(all_patches):
-            all_pred_chrs.append(self.chr_pred(x[:, flag:flag+1, :]))
+            all_pred_chrs.append(self.chr_decoder(x[:, flag:flag+1, :]))
             flag = flag + 1
             for size_index, size_list in enumerate(chr_list):
                 l = len(size_list)
                 inputs = x[:, flag:flag+l, :]
-                layer = self.patch_pred[size_index]
+                layer = self.block_decoder[size_index]
                 preds = layer(inputs)
                 L_tensor = torch.stack(size_list, dim=1)
                 p = size_list[0].shape[2]
@@ -277,7 +275,7 @@ class hicformer(nn.Module):
                     if self.otherlf == 'MSE':  
                         loss = torch.sum((interpolated_tensor - tensor1_reshaped) ** 2)
                     else:
-                        quantile_98 = torch.quantile(interpolated_tensor, 0.98)
+                        #quantile_98 = torch.quantile(interpolated_tensor, 0.98)
                         interpolated_tensor = (interpolated_tensor > 0).float()
                         criterion = nn.BCEWithLogitsLoss()
                         loss = criterion(tensor1_reshaped, interpolated_tensor)
@@ -319,13 +317,13 @@ class hicformer(nn.Module):
         latent_embed = self.latent_layer(chr_cls_tokens)
         cell_embed = self.pred_hidden(latent_embed)
         if self.enorm == True:
-            chr_pred = self.whole_pred(torch.nn.functional.gelu(cell_embed)) * imgs[-1]
+            chr_pred = self.cell_decoder(torch.nn.functional.gelu(cell_embed)) * imgs[-1]
         else:
-            chr_pred = self.whole_pred(torch.nn.functional.gelu(cell_embed))
+            chr_pred = self.cell_decoder(torch.nn.functional.gelu(cell_embed))
         weight = weight.to(device)
         chr_loss = torch.mean((chr_pred - all_chr_pred_goal) ** 2 * weight)
-        all_loss = patch_loss + chr_loss
-        return all_loss, chr_pred, cell_embed, patch_loss, chr_loss, chr_single_loss
+        
+        return  chr_pred, cell_embed, patch_loss, chr_loss, chr_single_loss
 
     def aepretrain(self, x):
         imgs = x
@@ -335,7 +333,7 @@ class hicformer(nn.Module):
         all_pred_chrs = []
         for i in range(len(x)-2):
             chr_cls = x[len(x)-2][:, i:i+1, :]
-            all_pred_chrs.append(self.chr_pred(chr_cls))
+            all_pred_chrs.append(self.chr_decoder(chr_cls))
             token_sequence.append(chr_cls)  # Insert chr_cls token here
         token_sequence = torch.cat(token_sequence, dim=1)
         all_chr_flatten = []
@@ -374,9 +372,9 @@ class hicformer(nn.Module):
         latent_embed = self.latent_layer(chr_cls_tokens)
         cell_embed = self.pred_hidden(latent_embed)
         if self.enorm == True:
-            chr_pred = self.whole_pred(torch.nn.functional.gelu(cell_embed)) * imgs[-1]
+            chr_pred = self.cell_decoder(torch.nn.functional.gelu(cell_embed)) * imgs[-1]
         else:
-            chr_pred = self.whole_pred(torch.nn.functional.gelu(cell_embed))
+            chr_pred = self.cell_decoder(torch.nn.functional.gelu(cell_embed))
         weight = weight.to(device)
         chr_loss = torch.mean((chr_pred - all_chr_pred_goal) ** 2 * weight)
         return chr_loss, chr_single_loss
@@ -395,11 +393,11 @@ class hicformer(nn.Module):
             chr_patches = []  # List to save patches of all sizes within one chromosome
             input_image = x[i]
             token_sequence.append(chr_cls)  # Insert chromosome class token here
-            for j in range(len(self.patch_embed_branches)):
+            for j in range(len(self.multi_encoder)):
                 input_image = x[i]
                 _, _, h, _ = input_image.shape
                 if h >= self.patch_size[j]:
-                    embed_layer = self.patch_embed_branches[j]
+                    embed_layer = self.multi_encoder[j]
                     tokens, diagonal_patches = embed_layer(input_image)
                     token_sequence.append(tokens)
                     chr_patches.append(diagonal_patches)
@@ -410,12 +408,12 @@ class hicformer(nn.Module):
         all_loss = 0
         count = 0
         for chr_index, chr_list in enumerate(all_patches):
-            # all_pred_chrs.append(self.chr_pred(x[:, flag:flag+1, :]))
+            # all_pred_chrs.append(self.chr_decoder(x[:, flag:flag+1, :]))
             flag = flag + 1
             for size_index, size_list in enumerate(chr_list):
                 l = len(size_list)
                 inputs = x[:, flag:flag + l, :]
-                layer = self.patch_pred[size_index]
+                layer = self.block_decoder[size_index]
                 preds = layer(inputs)
                 L_tensor = torch.stack(size_list, dim=1)
                 p = size_list[0].shape[2]
@@ -429,7 +427,7 @@ class hicformer(nn.Module):
                     loss = torch.sum((preds_reshaped - L_tensor) ** 2)
                 else:
                     L_tensor = L_tensor.view(preds.shape[0], preds.shape[1], p, p)
-                    quantile_98 = torch.quantile(L_tensor, 0.98)
+                    #quantile_98 = torch.quantile(L_tensor, 0.98)
                     L_tensor = (L_tensor > 0).float()
                     criterion = nn.BCEWithLogitsLoss()
                     loss = criterion(preds_reshaped, L_tensor)
@@ -446,7 +444,7 @@ class hicformer(nn.Module):
 
     def forward(self, imgs, mask_ratio=0.0):
         x, attn_mask, all_patches, token_class = self.forward_encoder(imgs, mask_ratio=mask_ratio)
-        loss, chr_pred, cell_embed, patch_loss, chr_loss, chr_single_loss = self.forward_loss(imgs, all_patches, x, token_class)
-        return loss, x, chr_pred, cell_embed,token_class, patch_loss, chr_loss, chr_single_loss
+        chr_pred, cell_embed, patch_loss, chr_loss, chr_single_loss = self.forward_loss(imgs, all_patches, x, token_class)
+        return x, chr_pred, cell_embed,token_class, patch_loss, chr_loss, chr_single_loss
     
 
