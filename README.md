@@ -5,7 +5,7 @@
 Built upon a multi-scale attention framework, Hi-Cformer simultaneously captures both broad and fine-grained chromatin interaction features. It delivers **low-dimensional representations** of single cells that are highly informative for tasks such as clustering, cell type annotation, and imputation of 3D genomic signals. Its robust design supports generalization across different datasets and resolutions, offering a versatile tool for 3D genome analysis at single-cell resolution.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Xiaoqing-Wu02/Hi-Cformer/main/assets/hicformer.png" width="400" height="1000" alt="Hi-Cformer Model Architecture">
+  <img src="https://raw.githubusercontent.com/Xiaoqing-Wu02/Hi-Cformer/main/assets/hicformer.png" width="600" height="1200" alt="Hi-Cformer Model Architecture">
 </p>
 
 
