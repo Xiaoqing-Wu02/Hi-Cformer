@@ -262,6 +262,7 @@ class BlockWithCustomMask(nn.Module):
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
+
 class block_encoder(nn.Module):
     """
     Modified Patch Embedding module that extracts and processes only the diagonal patches from the input feature map.
@@ -297,19 +298,32 @@ class block_encoder(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape
         x = F.pad(x, (0, self.padding, 0, self.padding), value=0)
-        k = (H + self.padding - self.patch_size)//self.stride + 1
-        diagonal_patches = []
-        for m in range(0, k*self.stride, self.stride):
-            diagonal_patches.append(x[:,:,m:m+self.patch_size,m:m+self.patch_size])
-        result = []
-        for item in diagonal_patches:
-            result.append(self.proj(item))
-        x = torch.cat(result, dim=2)
+        H2 = H + self.padding
+
+        k = (H2 - self.patch_size)//self.stride + 1
+        starts = torch.arange(0, k*self.stride, self.stride, device=x.device)
+
+        
+        patches = x.unfold(2, self.patch_size, self.stride).unfold(3, self.patch_size, self.stride)
+        # patches: [B,C,k,k,p,p]
+        diag = patches[:, :, torch.arange(k, device=x.device), torch.arange(k, device=x.device)]
+        # diag: [B,C,k,p,p]
+
+        # 合并成大 batch 做一次 conv
+        diag2 = diag.permute(0,2,1,3,4).reshape(B*k, C, self.patch_size, self.patch_size)
+        out = self.proj(diag2)  # [B*k, embed_dim, 1, 1]  (因为 kernel=patch_size)
+
+        out = out.reshape(B, k, -1)  # [B,k,embed_dim]
         if self.flatten:
-            x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+            x = out  # already B,N,C
+        else:
+            x = out.transpose(1,2).unsqueeze(-1)  # if you want BCHW-like
         x = self.norm(x)
+
+
+        diagonal_patches = diag.permute(0,2,1,3,4)  # [B,k,C,p,p] 更好用
         return x, diagonal_patches
-    
+
 def calNMI(model1, data_loader_test, labels,device):
     model1.eval()
     cell_embed_matrix = []
@@ -323,7 +337,7 @@ def calNMI(model1, data_loader_test, labels,device):
             chr_cls_tokens = chr_cls_tokens.view(chr_cls_tokens.shape[0], -1)
             cell_embed = model1.latent_layer(chr_cls_tokens)
             cell_embed = model1.pred_hidden(cell_embed)
-            cell_embed = torch.nn.functional.gelu(cell_embed)
+            #cell_embed = torch.nn.functional.gelu(cell_embed)
             cell_embed = np.squeeze(cell_embed.cpu().numpy())
             cell_embed_matrix.append(cell_embed)
     cell_embed_matrix = np.vstack(cell_embed_matrix)
@@ -371,7 +385,7 @@ def calNMI_pretrain(model1, data_loader_test, labels,device):
             chr_cls_tokens = chr_cls_tokens.view(chr_cls_tokens.shape[0], -1)
             latent_embed = model1.latent_layer(chr_cls_tokens)
             cell_embed = model1.pred_hidden(latent_embed)
-            cell_embed = torch.nn.functional.gelu(cell_embed)
+            #cell_embed = torch.nn.functional.gelu(cell_embed)
             cell_embed = np.squeeze(cell_embed.cpu().numpy())
             cell_embed_matrix.append(cell_embed)
     cell_embed_matrix = np.vstack(cell_embed_matrix)
@@ -417,7 +431,31 @@ def get_embeddings(model1, data_loader_test, labels,device):
             chr_cls_tokens = chr_cls_tokens.view(chr_cls_tokens.shape[0], -1)
             cell_embed = model1.latent_layer(chr_cls_tokens)
             cell_embed = model1.pred_hidden(cell_embed)
-            cell_embed = torch.nn.functional.gelu(cell_embed)
+            #cell_embed = torch.nn.functional.gelu(cell_embed)
+            cell_embed = np.squeeze(cell_embed.cpu().numpy())
+            cell_embed_matrix.append(cell_embed)
+    cell_embed_matrix = np.vstack(cell_embed_matrix)
+    return cell_embed_matrix
+
+def get_embeddings_pretrain(model1, data_loader_test, labels,device):
+    model1.eval()
+    cell_embed_matrix = []
+    with torch.no_grad():
+        for inputs in data_loader_test:
+            inputs = [item.to(device) for item in inputs]
+            token_sequence = []#所有token
+            x = inputs
+            for i in range(len(x)-2):
+                chr_cls = x[len(x)-2][:,i:i+1,:]
+                token_sequence.append(chr_cls)#此时插入chr_cls_token
+            token_sequence = torch.cat(token_sequence, dim=1)
+            token_sequence = model1.norm(token_sequence)
+            x = token_sequence
+            chr_cls_tokens = x
+            chr_cls_tokens = chr_cls_tokens.view(chr_cls_tokens.shape[0], -1)
+            latent_embed = model1.latent_layer(chr_cls_tokens)
+            cell_embed = model1.pred_hidden(latent_embed)
+            #cell_embed = torch.nn.functional.gelu(cell_embed)
             cell_embed = np.squeeze(cell_embed.cpu().numpy())
             cell_embed_matrix.append(cell_embed)
     cell_embed_matrix = np.vstack(cell_embed_matrix)
