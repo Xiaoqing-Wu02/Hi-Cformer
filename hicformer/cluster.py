@@ -310,7 +310,12 @@ def lisi_graph_py(
 #     )  # create POSIX path to file to execute compiled cpp-code
     # comment: POSIX path needs to be converted to string - done below with 'as_posix()'
     # create evenly split chunks if n_obs is divisible by n_chunks (doesn't really make sense on 2nd thought)
-    cpp_file_path = '/home/jianglab/program/scCASdata/integration/scib-main/scib/knn_graph/knn_graph.o'
+    cpp_file_path = os.environ.get("SCIB_KNN_GRAPH")
+    if not cpp_file_path:
+        raise FileNotFoundError(
+            "Set SCIB_KNN_GRAPH to the compiled scIB knn_graph executable "
+            "before computing LISI."
+        )
     args_int = [
         cpp_file_path, 
         #cpp_file_path.as_posix(),

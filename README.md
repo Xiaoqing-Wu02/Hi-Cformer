@@ -1,61 +1,83 @@
 # Hi-Cformer
 
-**Hi-Cformer** is a transformer-based model designed to analyze single-cell Hi-C (scHi-C) data, addressing the inherent challenges of sparsity and uneven contact distribution. Hi-Cformer targets the **complex, multi-scale, and local patterns** in scHi-C contact maps by modeling chromatin interactions across diverse genomic distances.
-
-Built upon a multi-scale attention framework, Hi-Cformer simultaneously captures both broad and fine-grained chromatin interaction features. It delivers **low-dimensional representations** of single cells that are highly informative for tasks such as clustering, cell type annotation, and imputation of 3D genomic signals. Its robust design supports generalization across different datasets and resolutions, offering a versatile tool for 3D genome analysis at single-cell resolution.
+Hi-Cformer is a transformer-based model for analyzing single-cell Hi-C data. It learns low-dimensional cell representations from sparse chromatin contact maps and supports clustering, cell type annotation, and contact-map imputation.
 
 <p align="center">
-  <img src="assets/hicformer_overview.png" alt="Hi-Cformer Model Architecture">
+  <img src="assets/hicformer_overview.png" alt="Hi-Cformer model architecture">
 </p>
 
----
+## Installation
 
-## 🚀 Highlights
-
-- **Multi-scale modeling of scHi-C maps**: Captures interaction blocks across genomic distances with specialized attention modules.
-- **Representation learning**: Derives low-dimensional embeddings that reflect chromatin structure heterogeneity.
-- **Accurate imputation of 3D genomic features**: Recovers interaction signals such as TAD-like boundaries and A/B compartments from sparse data.
-- **Generalizable cell type annotation**: Embeddings can be used for robust classification across datasets.
-
----
-
-## Tutorial
-
-This repository includes a tutorial example to help users get started with Hi-Cformer.
-
-- **Demo notebook:**  
-  The file [`demo/Ramani_tutorial.ipynb`](demo/Ramani_tutorial.ipynb) contains a step-by-step example using data from the Ramani2017 dataset.  
-  It explains the input file format, runs Hi-Cformer, and demonstrates how to generate and visualize embeddings and imputation results.
-
-- **Example configuration:**  
-  The file [`demo/config_ramani.json`](demo/config_ramani.json) provides an example configuration for running the Ramani2017 tutorial.
-
-- **Example input data:**  
-  Example input files are provided in the [`data/`](data/) directory.
-
-- **Quick start with training and inference script:**  
-  You can also use the Python script [`hicformer/train_inference.py`](hicformer/train_inference.py) to train Hi-Cformer and perform inference.  
-  Before running the script, please check and modify the input paths and configuration file according to your local environment.
-
-Example usage:
+Python 3.9 or newer is required. Install PyTorch for the CUDA version on your machine, then install this project:
 
 ```bash
-python hicformer/train_inference.py --config demo/config_ramani.json
+pip install -e .
 ```
 
----
+## Configurations
 
-## 📖 Citation
+Configuration files for Ramani2017, Lee2019, Tan2021A, Tan2021B, and Wu2024 are provided in `configs/`.
 
-If you use **Hi-Cformer** in your research, please cite:
+## Data layout
 
-> Xiaoqing Wu, Xiaoyang Chen, Zian Wang, Rui Jiang. *Hi-Cformer enables multi-scale chromatin contact map modeling for single-cell Hi-C data analysis*.
+All paths in the provided configurations are relative to the project root. Ramani2017 example data are included. For the remaining datasets, place the inputs in the layout below or edit `label_path` and `raw_path` in the corresponding configuration:
 
----
+```text
+data/
+├── Ramani2017/
+│   ├── label_info.pickle
+│   └── raw/chr*_sparse_adj.npy
+├── Lee2019/
+│   ├── label_info.pickle
+│   └── raw/chr*_sparse_adj.npy
+├── Tan2021A/
+│   ├── label_info.pickle
+│   └── raw/chr*_sparse_adj.npy
+├── Tan2021B/
+│   ├── label_info.pickle
+│   └── raw/chr*_sparse_adj.npy
+└── Wu2024/
+    ├── label_info.pickle
+    └── raw/chr*_sparse_adj.npy
+```
 
-## 📬 Contact
+Each chromosome file must contain one sparse contact matrix per cell. Cell order must be identical across chromosomes and must match `label_info.pickle`.
 
-For questions or collaborations, please contact:
+## Training and inference
 
-**Email**: xq-wu24@mails.tsinghua.edu.cn  
-**GitHub**: [@Xiaoqing-Wu02](https://github.com/Xiaoqing-Wu02)
+Run a dataset by supplying its name and the physical GPU index:
+
+```bash
+./run.sh Ramani2017 0
+./run.sh Lee2019 0
+./run.sh Tan2021A 0
+./run.sh Tan2021B 0
+./run.sh Wu2024 0
+```
+
+A configuration can also be launched directly:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m hicformer.train_inference \
+  --config configs/Ramani2017.json --cuda 0
+```
+
+Training outputs are written beneath `experiments/<dataset>/`. They include the requested and resolved configurations, timestamps, training log, checkpoint, training history, PCA cache, and final cell embeddings.
+
+## Demo
+
+The Ramani2017 tutorial uses the same configuration as the main training entry point:
+
+- `demo/Ramani2017_tutorial.ipynb`
+- `configs/Ramani2017.json`
+- `data/Ramani2017/`
+
+Launch Jupyter from the repository root or from `demo/` and run the notebook cells in order. Generated files are written to `demo/tutorial_output/`, which is ignored by Git.
+
+## Citation
+
+Wu, X., Wang, Z., Jiang, R., & Chen, X. (2026). Hi-Cformer enables multiscale chromatin contact map modeling for single-cell Hi-C data analysis. *Science Advances*, *12*(35), eaeg0134.
+
+## Contact
+
+Xiaoqing Wu: xq-wu24@mails.tsinghua.edu.cn

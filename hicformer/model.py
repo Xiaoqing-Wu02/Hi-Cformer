@@ -26,6 +26,7 @@ class hicformer(nn.Module):
         enorm=False,
         num_patches=24,
         weight_mode="mask",
+        decoder_activation="none",
     ):
         super().__init__()
 
@@ -41,6 +42,9 @@ class hicformer(nn.Module):
         self.otherlf = otherlf
         self.enorm = enorm
         self.weight_mode = weight_mode
+        if decoder_activation not in {"none", "gelu"}:
+            raise ValueError(f"unsupported decoder_activation: {decoder_activation}")
+        self.decoder_activation = decoder_activation
 
         self.multi_encoder = nn.ModuleList(
             [block_encoder(s, in_chans, embed_dim, stride=s, padding=0, norm_layer=norm_layer) for s in patch_size]
@@ -109,6 +113,11 @@ class hicformer(nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
+
+    def decode_cell(self, cell_embed):
+        if self.decoder_activation == "gelu":
+            cell_embed = F.gelu(cell_embed)
+        return self.cell_decoder(cell_embed)
 
     # -----------------------------
     # Fast upper-triangular flatten
@@ -428,9 +437,9 @@ class hicformer(nn.Module):
         cell_embed = self.pred_hidden(latent_embed)
 
         if self.enorm:
-            chr_pred = self.cell_decoder(cell_embed) * imgs[-1]
+            chr_pred = self.decode_cell(cell_embed) * imgs[-1]
         else:
-            chr_pred = self.cell_decoder(cell_embed)
+            chr_pred = self.decode_cell(cell_embed)
 
         chr_loss = torch.mean((chr_pred - all_chr_pred_goal) ** 2 * weight)
         return chr_pred, cell_embed, patch_loss, chr_loss, chr_single_loss
@@ -491,9 +500,9 @@ class hicformer(nn.Module):
         cell_embed = self.pred_hidden(latent_embed)
 
         if self.enorm:
-            chr_pred = self.cell_decoder(cell_embed) * imgs[-1]
+            chr_pred = self.decode_cell(cell_embed) * imgs[-1]
         else:
-            chr_pred = self.cell_decoder(cell_embed)
+            chr_pred = self.decode_cell(cell_embed)
 
         chr_loss = torch.mean((chr_pred - all_chr_pred_goal) ** 2 * weight)
         return chr_loss, chr_single_loss
@@ -611,9 +620,9 @@ class hicformer(nn.Module):
             cell_embed = self.pred_hidden(latent_embed)
 
             if self.enorm:
-                chr_pred = self.cell_decoder(cell_embed) * imgs[-1]
+                chr_pred = self.decode_cell(cell_embed) * imgs[-1]
             else:
-                chr_pred = self.cell_decoder(cell_embed)
+                chr_pred = self.decode_cell(cell_embed)
 
             if return_tokens:
                 return token_sequence, chr_pred, cell_embed, None
@@ -633,9 +642,9 @@ class hicformer(nn.Module):
             cell_embed = self.pred_hidden(latent_embed)
 
             if self.enorm:
-                chr_pred = self.cell_decoder(cell_embed) * imgs[-1]
+                chr_pred = self.decode_cell(cell_embed) * imgs[-1]
             else:
-                chr_pred = self.cell_decoder(cell_embed)
+                chr_pred = self.decode_cell(cell_embed)
 
             if return_tokens:
                 return x, chr_pred, cell_embed, token_class
