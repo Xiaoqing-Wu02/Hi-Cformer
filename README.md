@@ -64,6 +64,13 @@ CUDA_VISIBLE_DEVICES=0 python -m hicformer.train_inference \
 
 Training outputs are written beneath `experiments/<dataset>/`. They include the requested and resolved configurations, timestamps, training log, checkpoint, training history, PCA cache, and final cell embeddings.
 
+## Cell type classification
+
+```bash
+python -m hicformer.train_classifier --dataset Ramani2017 \
+  --checkpoint checkpoints/Ramani2017.pth --device cuda:0
+```
+
 ## Demo
 
 The Ramani2017 tutorial uses the same configuration as the main training entry point:
